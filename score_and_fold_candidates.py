@@ -32,63 +32,56 @@ def score_with_ai4amp(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # 3. Simple PDB writer (CA-only)
-def write_ca_pdb(seq_id: str, seq: str, positions, plddt, pdb_path: str):
+def write_ca_pdb(seq_id, seq, positions, plddt, out_path):
     """
-    Write a very simple CA-only PDB.
-    positions: [L, n_atoms, 3] tensor/ndarray
-    plddt: [L] tensor/ndarray
-    We assume atom index 1 is CA (standard for OpenFold/ESMFold ordering).
+    Minimal CA-only PDB writer for HuggingFace EsmForProteinFolding.
+    positions: tensor of shape (L, ..., 3) after taking batch dim 0
+    plddt: tensor of shape (L,) with per-residue scores
     """
     import numpy as np
 
-    pos = positions.cpu().numpy() if torch.is_tensor(positions) else positions
-    conf = plddt.cpu().numpy() if torch.is_tensor(plddt) else plddt
+    # Make sure we have numpy arrays
+    pos = positions.detach().cpu().numpy()
+    conf = plddt.detach().cpu().numpy() if plddt is not None else None
 
-    L = pos.shape[0]
-    # CA index in OpenFold atom order is 1 (N, CA, C, O, ...)
-    ca_idx = 1
+    L = len(seq)
+    with open(out_path, "w") as f:
+        atom_index = 1
+        for i, aa in enumerate(seq):
+            if i >= pos.shape[0]:
+                break
 
-    with open(pdb_path, "w") as f:
-        atom_serial = 1
-        for i in range(L):
-            x, y, z = pos[i, ca_idx]
-            b = conf[i]
-            res_idx = i + 1
-            res_name = "ALA"  # generic residue name (sequence-level identity not needed for visualization)
-            atom_name = "CA"
-            # Standard PDB ATOM line (limited info, but usable in PyMOL/Chimera)
+            # Take coordinates for residue i and flatten
+            # Whatever the internal structure, we just grab the first 3 floats
+            coord = np.asarray(pos[i]).reshape(-1)
+            if coord.size < 3:
+                # Skip if somehow malformed
+                continue
+            x, y, z = coord[:3]
+
+            # B-factor field: use pLDDT if available, else 0
+            b = float(conf[i]) if conf is not None and i < len(conf) else 0.0
+
             f.write(
-                "ATOM  {atom:5d} {name:^4s} {res:>3s} A{resid:4d}    "
-                "{x:8.3f}{y:8.3f}{z:8.3f}  1.00{b:6.2f}           C\n".format(
-                    atom=atom_serial,
-                    name=atom_name,
-                    res=res_name,
-                    resid=res_idx,
-                    x=x,
-                    y=y,
-                    z=z,
-                    b=b,
+                "ATOM  {:5d}  CA  ALA A{:4d}    {:8.3f}{:8.3f}{:8.3f}  1.00{:6.2f}           C\n".format(
+                    atom_index, i + 1, x, y, z, b
                 )
             )
-            atom_serial += 1
+            atom_index += 1
 
-        # END record
         f.write("END\n")
 
 # 4. Folding with HF ESMFold
-def fold_with_hf_esmfold(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
+def fold_with_hf_esmfold(df, out_dir="esmfold_candidates_hf"):
     os.makedirs(out_dir, exist_ok=True)
 
     print("Loading HuggingFace ESMFold (EsmForProteinFolding)...")
-    tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
-    model = EsmForProteinFolding.from_pretrained(
-        "facebook/esmfold_v1",
-        low_cpu_mem_usage=True,
-    )
+    model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1")
+    tok = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device)
-    print(f"Using device: {device}")
+    model = model.to(device).eval()
+    print("Using device:", device)
 
     results = []
 
@@ -97,22 +90,15 @@ def fold_with_hf_esmfold(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
         seq = row["seq"]
         print(f"Folding {seq_id} (length {len(seq)})...")
 
-        # Tokenize
-        tokens = tokenizer(
-            [seq],
-            return_tensors="pt",
-            add_special_tokens=False,
-        )["input_ids"].to(device)
+        inputs = tok(seq, return_tensors="pt", add_special_tokens=False)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
 
         with torch.no_grad():
-            outputs = model(tokens)
+            outputs = model(**inputs)
 
-        # outputs.positions: [B, L, atoms, 3]
-        # outputs.plddt: [B, L]
-        positions = outputs.positions[0]  # [L, atoms, 3]
-        plddt = outputs.plddt[0]         # [L]
-
-        plddt_mean = float(plddt.mean().item())
+        # positions: [batch, L, ... , 3], plddt: [batch, L]
+        positions = outputs.positions[0]        # take batch 0
+        plddt = outputs.plddt[0]                # per-residue confidence
 
         pdb_path = os.path.join(out_dir, f"{seq_id}.pdb")
         write_ca_pdb(seq_id, seq, positions, plddt, pdb_path)
@@ -120,7 +106,7 @@ def fold_with_hf_esmfold(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
         results.append({
             "id": seq_id,
             "seq": seq,
-            "pLDDT_mean": plddt_mean,
+            "pLDDT_mean": float(plddt.mean().item()),
             "pdb_path": pdb_path,
         })
 
