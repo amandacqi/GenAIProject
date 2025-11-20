@@ -2,20 +2,27 @@ import re
 import torch
 from transformers import AutoModelForCausalLM
 from tokenizers import Tokenizer
+from peft import PeftConfig, PeftModel
 
-MODEL_DIR = "progen2_prefix_tuned"  # same as OUTPUT_DIR above
+MODEL_DIR = "progen2_prefix_tuned"  # adapter dir
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load tuned model and tokenizer
 print("Loading tuned model...")
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_DIR,
-    trust_remote_code=True
-).to(device)
 
+# Load PEFT config from your adapter folder
+peft_config = PeftConfig.from_pretrained(MODEL_DIR)
+
+base_model = AutoModelForCausalLM.from_pretrained(
+    peft_config.base_model_name_or_path,
+    trust_remote_code=True
+)
+
+model = PeftModel.from_pretrained(base_model, MODEL_DIR).to(device)
+model.eval()
+
+# Load tokenizer from your saved tokenizer.json
 tok = Tokenizer.from_file(f"{MODEL_DIR}/tokenizer.json")
 
-# Get pad token id
 pad_id = tok.token_to_id("<pad>")
 if pad_id is None:
     raise ValueError("Pad token <pad> not found in tokenizer")
