@@ -12,11 +12,24 @@ print("Loading tuned model...")
 # Load PEFT config from your adapter folder
 peft_config = PeftConfig.from_pretrained(MODEL_DIR)
 
+# Load the base ProGen2 model that you fine-tuned
 base_model = AutoModelForCausalLM.from_pretrained(
     peft_config.base_model_name_or_path,
     trust_remote_code=True
 )
 
+# *** IMPORTANT: patch ProGen config to match what transformers.generate expects ***
+cfg = base_model.config
+if not hasattr(cfg, "num_hidden_layers") and hasattr(cfg, "n_layer"):
+    cfg.num_hidden_layers = cfg.n_layer
+if not hasattr(cfg, "hidden_size") and hasattr(cfg, "embed_dim"):
+    cfg.hidden_size = cfg.embed_dim
+if not hasattr(cfg, "num_attention_heads") and hasattr(cfg, "n_head"):
+    cfg.num_attention_heads = cfg.n_head
+if not hasattr(cfg, "max_position_embeddings") and hasattr(cfg, "n_positions"):
+    cfg.max_position_embeddings = cfg.n_positions
+
+# Attach the prefix-tuned adapter
 model = PeftModel.from_pretrained(base_model, MODEL_DIR).to(device)
 model.eval()
 
