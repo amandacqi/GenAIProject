@@ -36,31 +36,45 @@ def write_ca_pdb(seq_id, seq, positions, plddt, out_path):
     """
     Minimal CA-only PDB writer for HuggingFace EsmForProteinFolding.
     positions: tensor of shape (L, ..., 3) after taking batch dim 0
-    plddt: tensor of shape (L,) with per-residue scores
+    plddt: tensor of shape (L, ...) with per-residue scores
     """
     import numpy as np
+    import torch
 
     # Make sure we have numpy arrays
-    pos = positions.detach().cpu().numpy()
-    conf = plddt.detach().cpu().numpy() if plddt is not None else None
+    if isinstance(positions, torch.Tensor):
+        pos = positions.detach().cpu().numpy()
+    else:
+        pos = np.asarray(positions)
+
+    if plddt is not None:
+        if isinstance(plddt, torch.Tensor):
+            conf = plddt.detach().cpu().numpy()
+        else:
+            conf = np.asarray(plddt)
+    else:
+        conf = None
 
     L = len(seq)
+
     with open(out_path, "w") as f:
         atom_index = 1
         for i, aa in enumerate(seq):
             if i >= pos.shape[0]:
                 break
 
-            # Take coordinates for residue i and flatten
-            # Whatever the internal structure, we just grab the first 3 floats
+            # Flatten coordinates for residue i, take first 3 as x,y,z
             coord = np.asarray(pos[i]).reshape(-1)
             if coord.size < 3:
-                # Skip if somehow malformed
                 continue
             x, y, z = coord[:3]
 
-            # B-factor field: use pLDDT if available, else 0
-            b = float(conf[i]) if conf is not None and i < len(conf) else 0.0
+            # Per-residue B-factor: mean of conf[i], whatever its shape
+            if conf is not None and i < conf.shape[0]:
+                conf_i = np.asarray(conf[i]).reshape(-1)
+                b = float(conf_i.mean())
+            else:
+                b = 0.0
 
             f.write(
                 "ATOM  {:5d}  CA  ALA A{:4d}    {:8.3f}{:8.3f}{:8.3f}  1.00{:6.2f}           C\n".format(
