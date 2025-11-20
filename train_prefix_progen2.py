@@ -133,7 +133,7 @@ trainer.train()
 # 12. Save tuned model + tokenizer
 print("Saving model and tokenizer...")
 trainer.save_model(OUTPUT_DIR)
-tok.save(OUTPUT_DIR)  # saves tokenizer.json in OUTPUT_DIR
+tok.save(os.path.join(OUTPUT_DIR, "tokenizer.json"))
 
 # 13. Finish wandb run
 wandb.finish()
