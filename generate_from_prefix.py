@@ -158,11 +158,17 @@ def generate_peptides(
 
 if __name__ == "__main__":
     # Generate thousands
-    raw_seqs = generate_peptides(
-        cond_tag="helix_high anti-MRSA peptide",
-        num_seqs=2000,
-        max_new_tokens=64,
-    )
+    raw_seqs = []
+    batch = 200 
+
+    for i in range(2000 // batch):
+        print(f"Batch {i+1}")
+        seqs = generate_peptides(
+            cond_tag="helix_high anti-MRSA peptide",
+            num_seqs=batch,
+            max_new_tokens=64,
+        )
+        raw_seqs.extend(seqs)
 
     print(f"Generated {len(raw_seqs)} raw sequences")
 
