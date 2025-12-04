@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 import os
 import argparse
+import subprocess
+import tempfile
 
+import numpy as np
 import torch
 import pandas as pd
 from transformers import AutoTokenizer, EsmForProteinFolding
@@ -24,11 +27,82 @@ def load_candidates_csv(path: str) -> pd.DataFrame:
 
     return df[["id", "seq"]]
 
-# 2. Scoring stub
-def score_with_ai4amp(df: pd.DataFrame) -> pd.DataFrame:
-    """Placeholder for functional scoring."""
+# 2. Score candidates with AI4AMP
+def score_with_ai4amp(
+    df: pd.DataFrame,
+    ai4amp_root: str = "AI4AMP_predictor",   # path to the cloned repo
+) -> pd.DataFrame:
+    """
+    Run AI4AMP (PC6_predictor.py) on all sequences in df and
+    add an 'ai4amp_score' column with the prediction probability.
+    Requires the AI4AMP_predictor repo and its dependencies.
+    """
     df = df.copy()
-    df["ai4amp_score"] = float("nan")
+
+    # Make sure required columns exist
+    if "seq" not in df.columns:
+        raise ValueError("DataFrame must contain a 'seq' column.")
+    if "id" not in df.columns:
+        df["id"] = [f"cand_{i+1}" for i in range(len(df))]
+
+    pc6_dir = os.path.join(ai4amp_root, "PC6")
+    pc6_script = os.path.join(pc6_dir, "PC6_predictor.py")
+    if not os.path.exists(pc6_script):
+        raise FileNotFoundError(
+            f"Could not find PC6_predictor.py at {pc6_script}. "
+            f"Set ai4amp_root to the path of your AI4AMP_predictor clone."
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fasta_path = os.path.join(tmpdir, "candidates.fasta")
+        out_csv = os.path.join(tmpdir, "ai4amp_output.csv")
+
+        # 1) Write sequences to FASTA (use df['id'] as headers)
+        with open(fasta_path, "w") as f:
+            for _, row in df.iterrows():
+                seq_id = str(row["id"])
+                seq = str(row["seq"]).strip().upper()
+                f.write(f">{seq_id}\n{seq}\n")
+
+        # 2) Run AI4AMP predictor
+        cmd = [
+            "python3",
+            "PC6_predictor.py",
+            "-f", fasta_path,
+            "-o", out_csv,
+        ]
+        subprocess.run(cmd, cwd=pc6_dir, check=True)
+
+        # 3) Read AI4AMP output
+        pred = pd.read_csv(out_csv)
+
+        # Inspect pred.columns once in a notebook/REPL and pick
+        # the column that contains the probability (0–1).
+        # Many tools name it something like 'Score' or 'Probability'.
+        # Here we try a few common names and fall back if needed.
+        score_col_candidates = ["Score", "score", "Probability", "probability", "pred_score"]
+        score_col = None
+        for c in score_col_candidates:
+            if c in pred.columns:
+                score_col = c
+                break
+        if score_col is None:
+            raise ValueError(
+                f"Could not find a score column in AI4AMP output. "
+                f"Available columns: {list(pred.columns)}"
+            )
+
+        # 4) Align predictions with df
+        # The predictor keeps the same order as the input FASTA,
+        # so we can match by position.
+        if len(pred) != len(df):
+            raise ValueError(
+                f"Row count mismatch: df has {len(df)} rows but AI4AMP "
+                f"output has {len(pred)} rows."
+            )
+
+        df["ai4amp_score"] = pred[score_col].astype(float)
+
     return df
 
 # 3. Simple PDB writer (CA-only)
@@ -38,9 +112,6 @@ def write_ca_pdb(seq_id, seq, positions, plddt, out_path):
     positions: tensor of shape (L, ..., 3) after taking batch dim 0
     plddt: tensor of shape (L, ...) with per-residue scores
     """
-    import numpy as np
-    import torch
-
     # Make sure we have numpy arrays
     if isinstance(positions, torch.Tensor):
         pos = positions.detach().cpu().numpy()
