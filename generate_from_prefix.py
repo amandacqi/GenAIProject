@@ -174,7 +174,7 @@ if __name__ == "__main__":
 
     # Save ALL raw sequences to CSV  --------------------- NEW
     pd.DataFrame({"seq": raw_seqs}).to_csv(
-        "generated_raw.csv",
+        "/jet/home/aqi/generated_raw.csv",
         index=False
     )
     print("Saved raw sequences to candidates_raw.csv")
@@ -191,7 +191,7 @@ if __name__ == "__main__":
 
     # Save filtered sequences + properties to CSV -------- NEW
     pd.DataFrame(filtered).to_csv(
-        "generated_filtered.csv",
+        "/jet/home/aqi/generated_filtered.csv",
         index=False
     )
     print("Saved filtered sequences to candidates_filtered.csv")
