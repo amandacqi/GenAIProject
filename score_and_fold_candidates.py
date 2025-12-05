@@ -181,6 +181,14 @@ def fold_with_hf_esmfold(df, out_dir="esmfold_candidates_hf"):
         with torch.no_grad():
             outputs = model(**inputs)
 
+        # Extract PAE if available (L x L)
+        if hasattr(outputs, "predicted_aligned_error"):
+            pae = outputs.predicted_aligned_error[0].detach().cpu().numpy()
+            pae_mean = float(pae.mean())
+        else:
+            pae = None
+            pae_mean = None
+
         # positions: [batch, L, ... , 3], plddt: [batch, L]
         positions = outputs.positions[0]        # take batch 0
         plddt = outputs.plddt[0]                # per-residue confidence
@@ -192,6 +200,7 @@ def fold_with_hf_esmfold(df, out_dir="esmfold_candidates_hf"):
             "id": seq_id,
             "seq": seq,
             "pLDDT_mean": float(plddt.mean().item()),
+            "PAE_mean": pae_mean,
             "pdb_path": pdb_path,
         })
 
