@@ -197,7 +197,7 @@ if __name__ == "__main__":
         "/jet/home/aqi/generated_raw.csv",
         index=False
     )
-    print("Saved raw sequences to candidates_raw.csv")
+    print("Saved raw sequences to generated_raw.csv")
 
     # Filter by length, charge, hydrophobic moment
     filtered = filter_sequences(raw_seqs)
@@ -209,7 +209,7 @@ if __name__ == "__main__":
         "/jet/home/aqi/generated_filtered.csv",
         index=False
     )
-    print("Saved filtered sequences to candidates_filtered.csv")
+    print("Saved filtered sequences to generated_filtered.csv")
 
     # Print the first 20 filtered sequences for a quick check
     for props in filtered[:20]:
