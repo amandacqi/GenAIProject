@@ -5,6 +5,7 @@ from tokenizers import Tokenizer
 from peft import PeftConfig, PeftModel
 import csv
 import pandas as pd
+import math
 
 MODEL_DIR = "progen2_prefix_tuned"  # adapter dir
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -59,6 +60,21 @@ CHARGE_WEIGHTS = {
     "E": -1.0,
 }
 
+# Hydrophobic moment for alpha-helix
+def hydrophobic_moment_alpha(seq: str, angle_deg: float = 100.0) -> float:
+    theta = math.radians(angle_deg)
+    vx = 0.0
+    vy = 0.0
+    L = len(seq)
+    if L == 0:
+        return 0.0
+    for i, aa in enumerate(seq):
+        h = KD_SCALE.get(aa, 0.0)
+        angle = i * theta
+        vx += h * math.cos(angle)
+        vy += h * math.sin(angle)
+    return (vx**2 + vy**2) ** 0.5 / L
+
 # Compute properties for a single sequence
 def seq_properties(seq: str):
     seq = seq.strip()
@@ -66,7 +82,7 @@ def seq_properties(seq: str):
     if L == 0:
         return None
 
-    # mean Kyte–Doolittle hydrophobicity
+    # mean Kyte–Doolittle hydrophobicity (still computed, may be useful)
     kd_sum = 0.0
     counted = 0
     for aa in seq:
@@ -82,19 +98,23 @@ def seq_properties(seq: str):
     for aa in seq:
         q += CHARGE_WEIGHTS.get(aa, 0.0)
 
+    # Hydrophobic moment
+    hm = hydrophobic_moment_alpha(seq)
+
     return {
         "seq": seq,
         "length": L,
-        "kd": kd_mean,
+        "kd": kd_mean,       # keep kd if you want it in the CSV
+        "hm": hm,            
         "charge": q,
     }
 
-# Filter function on length, charge, hydrophobicity
+# Filter function on length, charge, hydrophobic moment
 def filter_sequences(
     seqs,
     length_range=(10, 40),
     charge_range=(+2.0, +10.0),
-    kd_range=(-0.5, 1.5),
+    hm_range=(0.25, 3.0),
 ):
     kept = []
     for s in seqs:
@@ -103,14 +123,14 @@ def filter_sequences(
             continue
 
         L = props["length"]
-        kd = props["kd"]
+        hm = props["hm"]
         q = props["charge"]
 
         if not (length_range[0] <= L <= length_range[1]):
             continue
         if not (charge_range[0] <= q <= charge_range[1]):
             continue
-        if not (kd_range[0] <= kd <= kd_range[1]):
+        if not (hm_range[0] <= hm <= hm_range[1]):
             continue
 
         kept.append(props)
@@ -172,24 +192,19 @@ if __name__ == "__main__":
 
     print(f"Generated {len(raw_seqs)} raw sequences")
 
-    # Save ALL raw sequences to CSV  --------------------- NEW
+    # Save ALL raw sequences to CSV
     pd.DataFrame({"seq": raw_seqs}).to_csv(
         "/jet/home/aqi/generated_raw.csv",
         index=False
     )
     print("Saved raw sequences to candidates_raw.csv")
 
-    # Filter by length, charge, hydrophobicity
-    filtered = filter_sequences(
-        raw_seqs,
-        length_range=(10, 40),
-        charge_range=(+2.0, +10.0),
-        kd_range=(-0.5, 1.5),
-    )
+    # Filter by length, charge, hydrophobic moment
+    filtered = filter_sequences(raw_seqs)
 
     print(f"{len(filtered)} sequences passed filters")
 
-    # Save filtered sequences + properties to CSV -------- NEW
+    # Save filtered sequences + properties to CSV
     pd.DataFrame(filtered).to_csv(
         "/jet/home/aqi/generated_filtered.csv",
         index=False
@@ -201,6 +216,6 @@ if __name__ == "__main__":
         print(
             f"{props['seq']}\t"
             f"L={props['length']}\t"
-            f"KD={props['kd']:.2f}\t"
+            f"HM={props['hm']:.2f}\t"
             f"Q={props['charge']:.1f}"
         )
