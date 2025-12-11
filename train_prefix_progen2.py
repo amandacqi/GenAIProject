@@ -7,7 +7,7 @@ from tokenizers import Tokenizer
 import wandb
 
 # 1. Paths and config
-MODEL_NAME = "hugohrban/progen2-medium"  # or progen2-small
+MODEL_NAME = "hugohrban/progen2-medium" 
 TRAIN_FILE = "progen2_prefix_train.txt"
 OUTPUT_DIR = "progen2_prefix_tuned"
 
